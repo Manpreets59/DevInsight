@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Repository {
+  id          String   @id @default(cuid())
+  name        String
+  owner       String
+  url         String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  analyses    Analysis[]
+
+  @@unique([owner, name])
+  @@index([owner, name])
+}
+
+model Analysis {
+  id            String   @id @default(cuid())
+  repositoryId  String
+  repository    Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  
+  // Analysis Results
+  codeHealth    Json     // Overall health metrics
+  issues        Json     // Detected issues
+  recommendations Json   // AI recommendations
+  metrics       Json     // Code metrics (LOC, complexity, etc.)
+  
+  // Metadata
+  analyzedAt    DateTime @default(now())
+  status        String   @default("pending") // pending, processing, completed, failed
+  duration      Int?     // Analysis duration in seconds
+  
+  @@index([repositoryId])
+  @@index([analyzedAt])
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String
+  preferences Json     // Team-specific preferences for Oumi fine-tuning
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
