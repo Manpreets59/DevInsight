@@ -4,6 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model Repository {
@@ -25,16 +26,14 @@ model Analysis {
   repositoryId  String
   repository    Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   
-  // Analysis Results
-  codeHealth    Json     // Overall health metrics
-  issues        Json     // Detected issues
-  recommendations Json   // AI recommendations
-  metrics       Json     // Code metrics (LOC, complexity, etc.)
+  codeHealth    Json
+  issues        Json
+  recommendations Json
+  metrics       Json
   
-  // Metadata
   analyzedAt    DateTime @default(now())
-  status        String   @default("pending") // pending, processing, completed, failed
-  duration      Int?     // Analysis duration in seconds
+  status        String   @default("pending")
+  duration      Int?
   
   @@index([repositoryId])
   @@index([analyzedAt])
@@ -43,7 +42,7 @@ model Analysis {
 model Team {
   id          String   @id @default(cuid())
   name        String
-  preferences Json     // Team-specific preferences for Oumi fine-tuning
+  preferences Json
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
