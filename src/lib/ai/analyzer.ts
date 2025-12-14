@@ -28,21 +28,27 @@ export interface CodeAnalysisResult {
   };
 }
 
-// Choose your AI provider
-const AI_PROVIDER = process.env.GEMINI_API_KEY ? 'gemini' : 
-                    process.env.GROQ_API_KEY ? 'groq' : null;
+// Choose your AI provider - Groq first (more reliable), Gemini as fallback
+const AI_PROVIDER = process.env.GROQ_API_KEY ? 'groq' :
+                    process.env.GEMINI_API_KEY ? 'gemini' : null;
 
 async function analyzeWithGemini(prompt: string): Promise<string> {
   if (!process.env.GEMINI_API_KEY) {
     throw new Error('GEMINI_API_KEY not found');
   }
 
-  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  try {
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    // Use gemini-2.0-flash which is the latest available model
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
-  const result = await model.generateContent(prompt);
-  const response = result.response;
-  return response.text();
+    const result = await model.generateContent(prompt);
+    const response = result.response;
+    return response.text();
+  } catch (error: any) {
+    console.error('Gemini API error:', error.message);
+    throw new Error(`Gemini API failed: ${error.message}`);
+  }
 }
 
 async function analyzeWithGroq(prompt: string): Promise<string> {
@@ -50,21 +56,30 @@ async function analyzeWithGroq(prompt: string): Promise<string> {
     throw new Error('GROQ_API_KEY not found');
   }
 
-  const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+  try {
+    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-  const chatCompletion = await groq.chat.completions.create({
-    messages: [
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ],
-    model: 'llama-3.3-70b-versatile', // Fast and capable
-    temperature: 0.3,
-    max_tokens: 4096,
-  });
+    const chatCompletion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      model: 'llama-3.3-70b-versatile', // Fast and capable
+      temperature: 0.3,
+      max_tokens: 4096,
+    });
 
-  return chatCompletion.choices[0]?.message?.content || '';
+    const content = chatCompletion.choices[0]?.message?.content || '';
+    if (!content) {
+      throw new Error('Empty response from Groq API');
+    }
+    return content;
+  } catch (error: any) {
+    console.error('Groq API error:', error.message);
+    throw new Error(`Groq API failed: ${error.message}`);
+  }
 }
 
 export async function analyzeRepository(
@@ -137,6 +152,8 @@ Respond with ONLY the JSON object, nothing else.`;
       throw new Error('No AI provider configured. Please set GEMINI_API_KEY or GROQ_API_KEY');
     }
 
+    console.log('Raw AI response:', responseText.substring(0, 200) + '...');
+
     // Clean up response - remove markdown code blocks if present
     responseText = responseText
       .replace(/```json\n?/g, '')
@@ -147,20 +164,32 @@ Respond with ONLY the JSON object, nothing else.`;
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.error('Could not find JSON in response:', responseText);
-      throw new Error('Invalid AI response format');
+      throw new Error(`Invalid AI response format. Expected JSON but got: ${responseText.substring(0, 100)}`);
     }
 
-    const parsed = JSON.parse(jsonMatch[0]);
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch (jsonError: any) {
+      console.error('JSON parse error:', jsonError.message);
+      console.error('Attempted to parse:', jsonMatch[0].substring(0, 200));
+      throw new Error(`Failed to parse AI response as JSON: ${jsonError.message}`);
+    }
     
     // Validate the response has required fields
     if (!parsed.codeHealth || !parsed.issues || !parsed.recommendations || !parsed.metrics) {
-      throw new Error('Missing required fields in AI response');
+      const missing = [];
+      if (!parsed.codeHealth) missing.push('codeHealth');
+      if (!parsed.issues) missing.push('issues');
+      if (!parsed.recommendations) missing.push('recommendations');
+      if (!parsed.metrics) missing.push('metrics');
+      throw new Error(`Missing required fields in AI response: ${missing.join(', ')}`);
     }
 
     return parsed as CodeAnalysisResult;
   } catch (error) {
     console.error('Analysis error:', error);
-    console.error('Response text:', responseText);
+    console.error('Response text:', responseText.substring(0, 500));
     
     // Return a fallback response for development
     return {
@@ -173,7 +202,7 @@ Respond with ONLY the JSON object, nothing else.`;
           type: 'General',
           severity: 'low',
           file: 'general',
-          message: 'AI analysis encountered an issue. Manual review recommended.',
+          message: `AI analysis encountered an issue: ${error instanceof Error ? error.message : 'Unknown error'}. Manual review recommended.`,
           suggestion: 'Review the repository manually for specific issues.',
         },
       ],
